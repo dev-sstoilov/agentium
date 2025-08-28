@@ -1,0 +1,711 @@
+<!DOCTYPE html>
+<html lang="bg">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Криптониум Троян</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        :root{
+            --matrix-bg: #000;
+            --neon: #00ff7f;
+            --neon-dim: #00c96a;
+            --glass: rgba(0,0,0,0.6);
+            --panel: rgba(0, 10, 0, 0.65);
+            --border-glow: rgba(0,255,127,0.08);
+            --muted: #6b7280;
+        }
+
+        *{margin:0;padding:0;box-sizing:border-box;font-family: "Courier New", Courier, monospace;}
+
+        html,body{height:100%;background:var(--matrix-bg);color:var(--neon); overflow:hidden;} /* prevent entire page scrolling */
+
+        /* matrix canvas */
+        #matrix-canvas{
+            position:fixed;
+            top:0;left:0;
+            width:100vw;height:100vh;
+            z-index:0;
+        }
+
+        .container{
+            position:relative;
+            z-index:2;
+            width:100%;
+            max-width:640px;
+            margin:20px auto;
+            /* keep the chat widget always smaller than the screen */
+            max-height: calc(100vh - 40px);
+            height: calc(100vh - 40px);
+            background: linear-gradient(180deg, rgba(0,0,0,0.55) 0%, rgba(0,0,0,0.75) 100%);
+            border-radius:12px;
+            overflow:hidden;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.6), 0 0 18px rgba(0,255,127,0.03) inset;
+            border: 1px solid rgba(0,255,127,0.06);
+            backdrop-filter: blur(6px);
+            display:flex;
+            flex-direction:column;
+        }
+
+        .header{
+            padding:18px 20px;
+            text-align:center;
+            font-size:1.6rem;
+            font-weight:700;
+            color:var(--neon);
+            letter-spacing:1px;
+            background: linear-gradient(90deg, rgba(0,0,0,0.35), rgba(0,10,0,0.45));
+            border-bottom:1px solid rgba(0,255,127,0.04);
+            box-shadow: 0 2px 10px rgba(0,0,0,0.6);
+            flex: 0 0 auto;
+        }
+
+        .login-container{ padding:26px; text-align:center; color:var(--neon-dim); overflow:auto; } /* internal scroll */
+        .login-title{ margin-bottom:18px; color:var(--neon); font-size:1.1rem; }
+
+        .input-group{ margin-bottom:18px; }
+
+        .input-field{
+            width:100%;
+            padding:12px 14px;
+            border-radius:8px;
+            border:1px solid rgba(0,255,127,0.06);
+            background: rgba(0,0,0,0.6);
+            color:var(--neon);
+            font-size:1rem;
+            outline:none;
+            text-align:center;
+        }
+        .input-field::placeholder{ color: rgba(0,255,127,0.35); font-style:italic; }
+
+        .btn{
+            display:inline-block;
+            padding:12px 20px;
+            border-radius:10px;
+            border:1px solid rgba(0,255,127,0.12);
+            background: linear-gradient(180deg, rgba(0,20,0,0.6), rgba(0,0,0,0.6));
+            color:var(--neon);
+            font-weight:700;
+            cursor:pointer;
+            transition: transform .08s ease, box-shadow .12s;
+            text-transform:uppercase;
+            letter-spacing:0.6px;
+        }
+        .btn:active{ transform: translateY(1px); }
+        .btn:hover{ box-shadow: 0 6px 18px rgba(0,255,127,0.06); }
+
+        .btn-block{ width:100%; }
+
+        .error-message{ color:#ff6b6b; margin-top:10px; font-size:0.9rem; }
+
+        /* Chat area now constrained and scrollable internally */
+        .chat-interface{
+            display:flex;
+            flex-direction:column;
+            flex:1 1 auto;
+            min-height:0; /* important for children flex with overflow */
+            overflow:hidden;
+        }
+
+        .user-info{
+            padding:10px 18px;
+            background: linear-gradient(90deg, rgba(0,0,0,0.32), rgba(0,10,0,0.38));
+            color:var(--neon);
+            display:flex;
+            justify-content:space-between;
+            align-items:center;
+            border-bottom:1px solid rgba(0,255,127,0.02);
+            flex:0 0 auto;
+        }
+
+        .chat-messages{
+            flex:1 1 auto;
+            overflow-y:auto;
+            padding:20px;
+            display:flex;
+            flex-direction:column;
+            gap:14px;
+            background: linear-gradient(180deg, rgba(0,0,0,0.25), rgba(0,0,0,0.35));
+            border-top: 1px solid rgba(0,255,127,0.02);
+            overscroll-behavior: none;
+        }
+
+        .message{
+            max-width:80%;
+            padding:12px 14px;
+            border-radius:12px;
+            position:relative;
+            line-height:1.4;
+            font-size:0.95rem;
+            background: rgba(0,0,0,0.45);
+            border:1px solid rgba(0,255,127,0.06);
+            box-shadow: 0 2px 12px rgba(0,0,0,0.6);
+            color:var(--neon-dim);
+            word-break:break-word;
+        }
+
+        .message.sent{
+            align-self:flex-end;
+            background: linear-gradient(90deg, rgba(0,30,0,0.6), rgba(0,0,0,0.4));
+            color:var(--neon);
+            border:1px solid rgba(0,255,127,0.14);
+            border-bottom-right-radius:4px;
+        }
+
+        .message.received{
+            align-self:flex-start;
+            background: rgba(0,0,0,0.6);
+            color:var(--neon-dim);
+            border:1px solid rgba(0,255,127,0.06);
+            border-bottom-left-radius:4px;
+        }
+
+        .message-sender{
+            font-size:0.75rem;
+            font-weight:700;
+            margin-bottom:6px;
+            color:var(--neon);
+            opacity:0.95;
+        }
+
+        .message-text{ white-space:pre-wrap; }
+
+        .message-timestamp{
+            font-size:0.7rem;
+            text-align:right;
+            margin-top:8px;
+            opacity:0.55;
+            color:var(--neon-dim);
+        }
+
+        .chat-input-container{
+            display:flex;
+            gap:10px;
+            padding:14px;
+            background: linear-gradient(180deg, rgba(0,0,0,0.45), rgba(0,0,0,0.55));
+            border-top:1px solid rgba(0,255,127,0.02);
+            flex:0 0 auto;
+        }
+
+        .chat-input{
+            flex:1;
+            padding:12px 14px;
+            border-radius:24px;
+            border:1px solid rgba(0,255,127,0.06);
+            background: rgba(0,0,0,0.6);
+            color:var(--neon);
+            outline:none;
+            font-size:1rem;
+        }
+
+        .send-button{
+            border-radius:24px;
+            padding:12px 18px;
+            background: linear-gradient(90deg, rgba(0,30,0,0.6), rgba(0,0,0,0.6));
+            border:1px solid rgba(0,255,127,0.12);
+            color:var(--neon);
+            font-weight:700;
+            cursor:pointer;
+        }
+
+        .status{
+            text-align:center;
+            padding:10px;
+            font-size:0.9rem;
+            color:var(--neon-dim);
+            background: linear-gradient(90deg, rgba(0,0,0,0.22), rgba(0,0,0,0.14));
+            border-top:1px solid rgba(0,255,127,0.02);
+            flex:0 0 auto;
+        }
+
+        .logout-btn{
+            background:none;
+            border:1px solid rgba(0,255,127,0.12);
+            color:var(--neon);
+            padding:6px 10px;
+            border-radius:6px;
+            cursor:pointer;
+        }
+
+        .hidden{ display:none; }
+
+        .user-list{
+            margin-top:15px;
+            padding:12px;
+            background: rgba(0,0,0,0.45);
+            border-radius:8px;
+            text-align:left;
+            border:1px solid rgba(0,255,127,0.03);
+        }
+        .user-list h3{ margin-bottom:10px; color:var(--neon); }
+        .user-list p{ margin:6px 0; padding:6px; background:rgba(0,0,0,0.55); border-radius:4px; color:var(--neon-dim); }
+
+        /* caret for typing effect */
+        .typing-caret::after{
+            content: "|";
+            margin-left:6px;
+            color:var(--neon);
+            opacity:0.95;
+            animation: blink 1s steps(2, start) infinite;
+            font-weight:700;
+        }
+        @keyframes blink {
+            50% { opacity: 0; }
+        }
+
+        /* small responsive tweaks */
+        @media (max-width:440px){
+            .container{ margin:12px; max-width:100%; border-radius:8px; }
+            .header{ font-size:1.25rem; padding:12px; }
+        }
+    </style>
+</head>
+<body>
+    <canvas id="matrix-canvas"></canvas>
+
+    <div class="container">
+        <div class="header" id="header-text">Криптониум Троян</div>
+
+        <div id="login-container" class="login-container">
+            <h2 class="login-title" id="login-title">Въведете вашия потребителски идентификатор</h2>
+            <div class="input-group">
+                <input type="text" id="user-id" class="input-field" placeholder="Въведете вашия ID">
+            </div>
+            <button id="login-btn" class="btn btn-block">Вход</button>
+            <div id="login-error" class="error-message hidden">Невалиден потребителски идентификатор</div>
+
+            <div class="user-list">
+                <h3>Налични потребителски идентификатори</h3>
+                <p>1243: Стефан</p>
+                <p>9878: Дара</p>
+                <p>6687: Влади</p>
+                <p>5878: Йосиф</p>
+            </div>
+        </div>
+
+        <div id="chat-interface" class="chat-interface hidden">
+            <div class="user-info">
+                <span id="user-info-text">Влязъл като: Стефан (1243)</span>
+                <button id="logout-btn" class="logout-btn">Изход</button>
+            </div>
+
+            <div class="chat-messages" id="chat-messages" tabindex="0" aria-live="polite">
+                <div class="message received" data-username="Система" data-created_at="">
+                    <div class="message-sender">Система</div>
+                    <div class="message-text">Добре дошли в чата! Започнете разговор.</div>
+                    <div class="message-timestamp">Точно сега</div>
+                </div>
+            </div>
+
+            <div class="status" id="status">
+                Зареждане на съобщения...
+            </div>
+
+            <div class="chat-input-container">
+                <input type="text" id="chat-input" class="chat-input" placeholder="Напишете вашето съобщение...">
+                <button id="send-button" class="send-button">Изпрати</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Supabase configuration (unchanged)
+        const SUPABASE_URL = 'https://zgpofqmurbwmgrhujskd.supabase.co';
+        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpncG9mcW11cmJ3bWdyaHVqc2tkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTYzMTY4MDMsImV4cCI6MjA3MTg5MjgwM30.4dw9IdQRaz67VRB73dZvwvagrWJWcOnpJs5QxU1v3S8';
+
+        // Initialize Supabase
+        const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+        // DOM elements
+        const loginContainer = document.getElementById('login-container');
+        const chatInterface = document.getElementById('chat-interface');
+        const userIdInput = document.getElementById('user-id');
+        const loginBtn = document.getElementById('login-btn');
+        const loginError = document.getElementById('login-error');
+        const userInfoText = document.getElementById('user-info-text');
+        const logoutBtn = document.getElementById('logout-btn');
+        const chatMessages = document.getElementById('chat-messages');
+        const chatInput = document.getElementById('chat-input');
+        const sendButton = document.getElementById('send-button');
+        const status = document.getElementById('status');
+        const headerText = document.getElementById('header-text');
+        const loginTitle = document.getElementById('login-title');
+
+        // User ID to username mapping
+        const userMap = {
+            '1243': 'Стефан',
+            '9878': 'Дара',
+            '6687': 'Влади',
+            '5878': 'Йосиф'
+        };
+
+        let currentUserId = '';
+        let currentUsername = '';
+        let refreshInterval = null;
+        const displayedMessageKeys = new Set();
+
+        // typing helper - returns a promise
+        function typeText(el, text, msPerChar = 20, addCaret = false) {
+            return new Promise(resolve => {
+                el.classList.add('typing-caret');
+                el.textContent = '';
+                let i = 0;
+                function step() {
+                    if (i < text.length) {
+                        el.textContent += text.charAt(i);
+                        i++;
+                        setTimeout(step, msPerChar + (Math.random() * 30));
+                    } else {
+                        el.classList.remove('typing-caret');
+                        resolve();
+                    }
+                }
+                step();
+            });
+        }
+
+        // initial UI typing
+        document.addEventListener('DOMContentLoaded', async () => {
+            // type header and login title and button labels
+            await typeText(headerText, 'Криптониум Троян', 12);
+            await typeText(loginTitle, 'Въведете вашия потребителски идентификатор', 10);
+            await typeText(loginBtn, 'Вход', 8);
+            await typeText(document.getElementById('send-button'), 'Изпрати', 8);
+            await typeText(document.getElementById('logout-btn'), 'Изход', 8);
+            await typeText(status, 'Зареждане на съобщения...', 8);
+        });
+
+        // Login button click handler
+        loginBtn.addEventListener('click', handleLogin);
+
+        // Also allow Enter key to login
+        userIdInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                handleLogin();
+            }
+        });
+
+        // Handle login
+        async function handleLogin() {
+            const userId = userIdInput.value.trim();
+
+            if (userMap[userId]) {
+                currentUserId = userId;
+                currentUsername = userMap[userId];
+
+                // show user info with typing effect
+                userInfoText.textContent = '';
+                await typeText(userInfoText, `Влязъл като: ${currentUsername} (${currentUserId})`, 8);
+
+                loginContainer.classList.add('hidden');
+                chatInterface.classList.remove('hidden');
+
+                initializeChat();
+
+                // insert a system "joined" message into supabase
+                try {
+                    const joinMessage = {
+                        username: 'Система',
+                        message: `${currentUsername} се присъедини към чата.`,
+                        created_at: new Date().toISOString()
+                    };
+                    const { error } = await supabase
+                        .from('messages')
+                        .insert([joinMessage]);
+                    if (error) {
+                        console.warn('Неуспешно добавяне на join-съобщение:', error);
+                    }
+                } catch (err) {
+                    console.error('Грешка при изпращане на join-съобщение:', err);
+                }
+            } else {
+                loginError.classList.remove('hidden');
+            }
+        }
+
+        // Logout button
+        logoutBtn.addEventListener('click', async () => {
+            if (refreshInterval) {
+                clearInterval(refreshInterval);
+                refreshInterval = null;
+            }
+
+            // optionally insert leave system message
+            try {
+                if (currentUsername) {
+                    const leaveMessage = {
+                        username: 'Система',
+                        message: `${currentUsername} напусна чата.`,
+                        created_at: new Date().toISOString()
+                    };
+                    await supabase.from('messages').insert([leaveMessage]);
+                }
+            } catch (e) {
+                console.warn('Неуспешно добавяне на leave-съобщение', e);
+            }
+
+            chatInterface.classList.add('hidden');
+            loginContainer.classList.remove('hidden');
+            userIdInput.value = '';
+            loginError.classList.add('hidden');
+
+            // Reset messages to initial welcome (translated)
+            chatMessages.innerHTML = '<div class="message received" data-username="Система" data-created_at=""><div class="message-sender">Система</div><div class="message-text">Добре дошли в чата! Започнете разговор.</div><div class="message-timestamp">Точно сега</div></div>';
+            displayedMessageKeys.clear();
+            currentUserId = '';
+            currentUsername = '';
+        });
+
+        // Initialize chat functionality
+        function initializeChat() {
+            status.textContent = '';
+            typeText(status, 'Зареждане на съобщения...', 8);
+
+            // Load messages and set up refresh interval
+            loadMessages();
+            refreshInterval = setInterval(loadMessages, 1000); // Refresh every second
+
+            // update status
+            setTimeout(() => {
+                status.textContent = '';
+                typeText(status, 'Свързано с Криптониум Троян', 8);
+            }, 600);
+
+            // Keep chat locked to bottom (prevent manual scroll away)
+            chatMessages.addEventListener('scroll', () => {
+                // always keep anchored to bottom
+                chatMessages.scrollTop = chatMessages.scrollHeight;
+            });
+        }
+
+        // Load messages from Supabase
+        async function loadMessages() {
+            try {
+                const { data, error } = await supabase
+                    .from('messages')
+                    .select('*')
+                    .order('created_at', { ascending: true });
+
+                if (error) {
+                    console.error('Error loading messages:', error);
+                    status.textContent = '';
+                    typeText(status, 'Грешка при зареждане на съобщения. Уверете се, че таблицата messages съществува.', 6);
+                    return;
+                }
+
+                // Render new messages only (dedupe by key)
+                for (let message of data) {
+                    const key = `${message.username}|||${message.message}|||${message.created_at}`;
+                    if (!displayedMessageKeys.has(key)) {
+                        addMessageToChat(message);
+                        displayedMessageKeys.add(key);
+                    }
+                }
+
+                // After new messages added, prune one non-visible message from DB (if exists)
+                pruneOneNonVisibleMessage();
+            } catch (err) {
+                console.error('Error in loadMessages:', err);
+                status.textContent = '';
+                typeText(status, 'Грешка при свързване', 8);
+            }
+        }
+
+        // Send a new message
+        sendButton.addEventListener('click', sendMessage);
+        chatInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                sendMessage();
+            }
+        });
+
+        async function sendMessage() {
+            const messageText = chatInput.value.trim();
+            if (!messageText) return;
+
+            const newMessage = {
+                username: currentUsername,
+                message: messageText,
+                created_at: new Date().toISOString()
+            };
+
+            try {
+                const { error } = await supabase
+                    .from('messages')
+                    .insert([newMessage]);
+
+                if (error) {
+                    console.error('Error sending message:', error);
+                    status.textContent = '';
+                    typeText(status, 'Грешка при изпращане на съобщение. Уверете се, че структурата на таблицата messages е коректна.', 6);
+                    return;
+                }
+
+                // Clear input and show locally immediately with typing
+                chatInput.value = '';
+                // reload messages quickly - will be deduped
+                loadMessages();
+            } catch (err) {
+                console.error('Error in sendMessage:', err);
+                status.textContent = '';
+                typeText(status, 'Грешка при изпращане на съобщение', 6);
+            }
+        }
+
+        // Add a message to the chat UI (with typing)
+        async function addMessageToChat(messageData) {
+            const messageElement = document.createElement('div');
+            messageElement.classList.add('message');
+
+            if (messageData.username === currentUsername) {
+                messageElement.classList.add('sent');
+            } else {
+                messageElement.classList.add('received');
+            }
+
+            // store identifying fields for potential deletion later
+            messageElement.dataset.username = messageData.username ?? '';
+            messageElement.dataset.created_at = messageData.created_at ?? '';
+            messageElement.dataset.message = messageData.message ?? '';
+
+            const senderElement = document.createElement('div');
+            senderElement.classList.add('message-sender');
+
+            const textElement = document.createElement('div');
+            textElement.classList.add('message-text');
+
+            const timeElement = document.createElement('div');
+            timeElement.classList.add('message-timestamp');
+
+            messageElement.appendChild(senderElement);
+            messageElement.appendChild(textElement);
+            messageElement.appendChild(timeElement);
+
+            chatMessages.appendChild(messageElement);
+
+            // Ensure the newest messages stay visible: scroll to bottom before typing
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+
+            // Type sender, message and timestamp sequentially
+            await typeText(senderElement, messageData.username, 10);
+            await typeText(textElement, messageData.message, 14);
+            await typeText(timeElement, formatTime(messageData.created_at), 10);
+
+            // ensure scrolled to bottom after typed
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+
+        // Format timestamp
+        function formatTime(isoString) {
+            try {
+                const date = new Date(isoString);
+                if (isNaN(date)) return '—';
+                return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            } catch {
+                return '—';
+            }
+        }
+
+        // Prune ONE non-visible (scrolled out of view at the top) message from DB and DOM.
+        // This deletes at most one message per call to avoid aggressive deletion.
+        async function pruneOneNonVisibleMessage() {
+            try {
+                const containerRect = chatMessages.getBoundingClientRect();
+                // iterate children from the top (oldest) and find the first that is above the visible area
+                for (let i = 0; i < chatMessages.children.length; i++) {
+                    const child = chatMessages.children[i];
+                    const rect = child.getBoundingClientRect();
+                    // if the bottom of the element is less than the top of the container, it's not visible
+                    if (rect.bottom < containerRect.top + 5) {
+                        // prepare identifying data
+                        const username = child.dataset.username || '';
+                        const created_at = child.dataset.created_at || '';
+                        const message = child.dataset.message || '';
+
+                        // Attempt to delete from DB (match on three fields). If your table has an 'id' column, prefer deleting by id.
+                        try {
+                            const { error } = await supabase
+                                .from('messages')
+                                .delete()
+                                .match({ username: username, message: message, created_at: created_at });
+
+                            if (error) {
+                                console.warn('Неуспешно изтриване на не-видимо съобщение от БД:', error);
+                            } else {
+                                // remove from DOM and displayed keys set
+                                const key = `${username}|||${message}|||${created_at}`;
+                                if (displayedMessageKeys.has(key)) displayedMessageKeys.delete(key);
+                                child.remove();
+                            }
+                        } catch (err) {
+                            console.error('Грешка при опит за изтриване от БД:', err);
+                        }
+                        // delete at most one per invocation
+                        break;
+                    }
+                }
+            } catch (err) {
+                console.error('Грешка в pruneOneNonVisibleMessage:', err);
+            }
+        }
+
+        /* --------------------------
+           Matrix rain canvas script - slowed ~3x
+           -------------------------- */
+        (function matrixRain(){
+            const canvas = document.getElementById('matrix-canvas');
+            const ctx = canvas.getContext('2d');
+            let width = canvas.width = window.innerWidth;
+            let height = canvas.height = window.innerHeight;
+            window.addEventListener('resize', () => {
+                width = canvas.width = window.innerWidth;
+                height = canvas.height = window.innerHeight;
+                initCols();
+            });
+
+            const fontSize = 16;
+            let columns;
+            let drops = [];
+
+            const chars = ('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789@#$%^&*()*&^%').split('');
+
+            function initCols(){
+                columns = Math.floor(width / fontSize);
+                // use floats so we can increment less than 1 (slower)
+                drops = new Array(columns).fill(1).map(() => Math.random() * (height/fontSize));
+            }
+            initCols();
+
+            function draw(){
+                // translucent BG to create trail effect
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.05)';
+                ctx.fillRect(0, 0, width, height);
+
+                ctx.font = fontSize + 'px monospace';
+                for (let i = 0; i < drops.length; i++) {
+                    const text = chars[Math.floor(Math.random() * chars.length)];
+                    const x = i * fontSize;
+                    const y = drops[i] * fontSize;
+
+                    // bright head
+                    ctx.fillStyle = 'rgba(180,255,200,0.9)';
+                    ctx.fillText(text, x, y);
+
+                    // dim tail
+                    ctx.fillStyle = 'rgba(0,150,80,0.25)';
+                    for (let t = 1; t < 4; t++) {
+                        ctx.fillText(text, x, y - t * fontSize * 0.6);
+                    }
+
+                    // slow down vertical movement by incrementing by ~1/3 (approx 3x slower)
+                    drops[i] += 0.333;
+
+                    if (y > height && Math.random() > 0.975) drops[i] = 0;
+                }
+                requestAnimationFrame(draw);
+            }
+            draw();
+        })();
+    </script>
+</body>
+</html>
